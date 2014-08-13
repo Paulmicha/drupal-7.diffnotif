@@ -1,0 +1,4 @@
+name = Differences notification
+description = Simple way of notifying (by email) a configurable list of users, upon modification of nodes from a configurable list of content types.
+core = 7.x
+dependencies[] = diff

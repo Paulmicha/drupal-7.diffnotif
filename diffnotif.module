@@ -1,0 +1,112 @@
+<?php
+
+/**
+ * @file
+ * Differences notification
+ * Simple way of notifying (by email) a configurable list of users,
+ * upon modification of nodes from a configurable list of content types.
+ * 
+ * Use case :
+ * A list of users must always be notified by email
+ * when any content of a list of content types is modified by someone else,
+ * and they must receive the list of modifications (see required 'diff' module).
+ * 
+ * Restrictions :
+ *  • Single list of subscribers (no too many ~ 20 max maybe,
+ *    because there is no queue for sending emails)
+ *  • Single list of content types
+ *  • Only triggers on modification of these nodes
+ * 
+ * Alternatives :
+ *  • Comparison of notifications / subscriptions modules :
+ *    @see https://groups.drupal.org/node/15928
+ *  • Message stack :
+ *    @see http://drupal.org/project/message
+ */
+
+
+/**
+ * Implement hook_node_update()
+ */
+function diffnotif_node_update($node) {
+  $content_types_whitelist = explode(',',variable_get('diffnotif_content_types', ''));
+  $subscribers_uids = explode(',',variable_get('diffnotif_subscribers', ''));
+  if (empty($content_types_whitelist) || empty($subscribers_uids)) {
+    return;
+  }
+  if (in_array($node->type, $content_types_whitelist)) {
+    $old_node = $node->original;
+    module_load_include('inc', 'diff', 'diff.pages');
+    
+    // Create diff of old node and edited node.
+    $rows = _diff_body_rows($old_node, $node);
+    $header = _diff_default_header(t('Original'), t('Changes'));
+    $markup = theme('table__diff__preview', array(
+      'header' => $header,
+      'rows' => $rows,
+      'attributes' => array('class' => 'diff'),
+      'colgroups' => _diff_default_cols(),
+      'sticky' => FALSE,
+    ));
+
+    $path = drupal_get_path('module', 'diff');
+    //drupal_add_css("$path/diff.css");
+    //drupal_add_css("$path/css/diff.default.css");
+    
+    // debug ok 2014/08/13 15:55:35
+    drupal_set_message("<style>" . file_get_contents("$path/diff.css") . "</style>");
+    drupal_set_message("<style>" . file_get_contents("$path/css/diff.default.css") . "</style>");
+    drupal_set_message($markup);
+    
+    // @todo Send email
+  }
+}
+
+
+/**
+ * Implement hook_entity_update()
+ *
+function diffnotif_entity_update($entity, $type) {
+  $content_types_whitelist = explode(',',variable_get('diffnotif_content_types', ''));
+  $subscribers_uids = explode(',',variable_get('diffnotif_subscribers', ''));
+  if (empty($content_types_whitelist) || empty($subscribers_uids)) {
+    return;
+  }
+  list($entity_id, $rid, $bundle_name) = entity_extract_ids($type, $entity);
+  if ($type == 'node' && in_array($bundle_name, $content_types_whitelist)) {
+    $node = node_load($entity_id);
+    module_load_include('inc', 'diff', 'diff.pages');
+    $old_vid = _diff_get_previous_vid(node_revision_list($node), $node->vid);
+    $markup = diff_inline_show($node, $old_vid);
+
+    $path = drupal_get_path('module', 'diff');
+    //drupal_add_css("$path/diff.css");
+    //drupal_add_css("$path/css/diff.default.css");
+    
+    // debug
+    drupal_set_message("<style>" . file_get_contents("$path/diff.css") . "</style>");
+    drupal_set_message("<style>" . file_get_contents("$path/css/diff.default.css") . "</style>");
+    drupal_set_message($markup);
+  }
+}
+/**/
+
+
+/**
+ * Implement hook_menu()
+ */
+function diffnotif_menu() {
+  $items = array();
+
+  $items['admin/config/diffnotif'] = array(
+    'title' => t("Differences notification"),
+    'description' => t('Simple way of notifying (by email) a configurable list of users, upon modification of nodes from a configurable list of content types.'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('diffnotif_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'diffnotif.admin.inc',
+  );
+
+  return $items;
+}
+
