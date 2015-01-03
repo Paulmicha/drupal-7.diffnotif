@@ -16,6 +16,7 @@
  *    because there is no queue for sending emails)
  *  • Single list of content types
  *  • Only triggers on modification of these nodes
+ *  • No exceptions, no conditions
  * 
  * Alternatives :
  *  • Comparison of notifications / subscriptions modules :
@@ -35,61 +36,64 @@ function diffnotif_node_update($node) {
     return;
   }
   if (in_array($node->type, $content_types_whitelist)) {
-    $old_node = $node->original;
+    $path = drupal_get_path('module', 'diff');
     module_load_include('inc', 'diff', 'diff.pages');
     
     // Create diff of old node and edited node.
-    $rows = _diff_body_rows($old_node, $node);
+    $rows = _diff_body_rows($node->original, $node);
     $header = _diff_default_header(t('Original'), t('Changes'));
-    $markup = theme('table__diff__preview', array(
+    $diff_markup = theme('table__diff__preview', array(
       'header' => $header,
       'rows' => $rows,
       'attributes' => array('class' => 'diff'),
       'colgroups' => _diff_default_cols(),
       'sticky' => FALSE,
     ));
-
-    $path = drupal_get_path('module', 'diff');
-    //drupal_add_css("$path/diff.css");
-    //drupal_add_css("$path/css/diff.default.css");
     
     // debug ok 2014/08/13 15:55:35
-    drupal_set_message("<style>" . file_get_contents("$path/diff.css") . "</style>");
-    drupal_set_message("<style>" . file_get_contents("$path/css/diff.default.css") . "</style>");
-    drupal_set_message($markup);
+    //drupal_set_message("<style>" . file_get_contents("$path/diff.css") . "</style>");
+    //drupal_set_message("<style>" . file_get_contents("$path/css/diff.default.css") . "</style>");
+    //drupal_set_message($diff_markup);
     
-    // @todo Send email
+    // Email content
+    // @todo i18n - use t() for text
+    global $user;
+    $recipients = array();
+    $message_body = "";
+    $message_subject = "Notif Modif " . $node->type . ' : "' . $node->original->title . '" by ' . $user->name;
+    $message_body .= "<style>";
+    $message_body .= file_get_contents("$path/diff.css");
+    $message_body .= file_get_contents("$path/css/diff.default.css");
+    $message_body .= "</style>";
+    $message_body .= "By : <strong>";
+    $message_body .= $user->name;
+    $message_body .= " (";
+    $message_body .= $user->mail;
+    $message_body .= ")</strong>";
+    $message_body .= "<br/>";
+    $message_body .= "Date : <strong>";
+    $message_body .= format_date(time());
+    $message_body .= "</strong><br/>";
+    $message_body .= "Details :";
+    $message_body .= "<br/>";
+    $message_body .= $diff_markup;
+    $message_body .= "<br/>";
+    
+    // Recipients
+    foreach($subscribers_uids as $uid) {
+      if ($user->uid != $uid) {
+        $account = user_load($uid);
+        $recipients[] = $account->name . ' <' . $account->mail . '>';
+      }
+    }
+    
+    // Send email
+    drupal_mail('diffnotif', 'notif', join(', ', $recipients), language_default(), array(
+      'subject' => $message_subject,
+      'body' => $message_body,
+    ));
   }
 }
-
-
-/**
- * Implement hook_entity_update()
- *
-function diffnotif_entity_update($entity, $type) {
-  $content_types_whitelist = explode(',',variable_get('diffnotif_content_types', ''));
-  $subscribers_uids = explode(',',variable_get('diffnotif_subscribers', ''));
-  if (empty($content_types_whitelist) || empty($subscribers_uids)) {
-    return;
-  }
-  list($entity_id, $rid, $bundle_name) = entity_extract_ids($type, $entity);
-  if ($type == 'node' && in_array($bundle_name, $content_types_whitelist)) {
-    $node = node_load($entity_id);
-    module_load_include('inc', 'diff', 'diff.pages');
-    $old_vid = _diff_get_previous_vid(node_revision_list($node), $node->vid);
-    $markup = diff_inline_show($node, $old_vid);
-
-    $path = drupal_get_path('module', 'diff');
-    //drupal_add_css("$path/diff.css");
-    //drupal_add_css("$path/css/diff.default.css");
-    
-    // debug
-    drupal_set_message("<style>" . file_get_contents("$path/diff.css") . "</style>");
-    drupal_set_message("<style>" . file_get_contents("$path/css/diff.default.css") . "</style>");
-    drupal_set_message($markup);
-  }
-}
-/**/
 
 
 /**
@@ -108,5 +112,19 @@ function diffnotif_menu() {
   );
 
   return $items;
+}
+
+
+/**
+ * Implement hook_mail()
+ */
+function diffnotif_mail($key, &$message, $params) {
+  switch($key) {
+    default :
+    case 'notif' :
+      $message['subject'] = $params['subject'];
+      $message['body'][] = $params['body'];
+      break;
+  }
 }
 
